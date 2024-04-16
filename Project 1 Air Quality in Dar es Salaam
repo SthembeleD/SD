@@ -22,11 +22,19 @@ dar = db["dar-es-salaam"]
 
 for collection in db.list_collections():
     print(collection['name'])
+#OUTPUT
+lagos
+system.buckets.lagos
+system.views
+dar-es-salaam
+system.buckets.dar-es-salaam
+nairobi
+system.buckets.nairobi
+
 
 # Creating a Wrangle function to extract all sites with most total readings
 # The function will Remove all outliers readings that are above 100 
 # ||Resample Data, impute missing values and return series y
-
 def wrangle(collection):
     results = collection.find(
         {"metadata.site": 11, "metadata.measurement": "P2"},
@@ -42,6 +50,15 @@ df = pd.DataFrame(results).set_index("timestamp")
     # Resample to 1hour period, fill in missing values
     y = df["P2"].resample("1H").mean().fillna(method='ffill')
     return y
+ #OUTPUT
+timestamp
+2018-01-01 03:00:00+03:00    9.456327
+2018-01-01 04:00:00+03:00    9.400833
+2018-01-01 05:00:00+03:00    9.331458
+2018-01-01 06:00:00+03:00    9.528776
+2018-01-01 07:00:00+03:00    8.861250
+Freq: H, Name: P2, dtype: float64
+
 
 # Create a time series plot of the readings in y
 fig, ax = plt.subplots(figsize=(15, 6))
@@ -73,6 +90,9 @@ y_train = y[:cutoff_test]
 y_test = y[cutoff_test:]
 print("y_train shape:", y_train.shape)
 print("y_test shape:", y_test.shape)
+#OUTPUT
+y_train shape: (1944,)
+y_test shape: (216,
 
 #BUILDING A MODEL 
 #CALCULATING BASELINE MEAN ABSOLUTE ERROR FOR MODEL
@@ -81,6 +101,9 @@ y_pred_baseline = [y_train_mean] * len(y_train)
 mae_baseline = mean_absolute_error(y_train, y_pred_baseline)
 print("Mean P2 Reading:", y_train_mean)
 print("Baseline MAE:", mae_baseline)
+#OUTPUT
+Mean P2 Reading: 8.57142319061077
+Baseline MAE: 4.053101181299159
 
 
 # USING AUTOReg MODEL TO PREDICT PM2.5 READINGS USING FOR LOOP TO TRAIN AR MODEL
@@ -102,6 +125,13 @@ for p in p_params:
     maes.append(mae)
     mae_series = pd.Series(maes, name="mae", index=p_params)
 mae_series.head()
+#OUTPUT
+1    1.059376
+2    1.045182
+3    1.032489
+4    1.032147
+5    1.031022
+Name: mae, dtype: float64
 
 #  Calculate the training residuals for best_model and assign the result to y_train_resid
 y_pred = best_model.predict().dropna()
@@ -129,6 +159,14 @@ for i in range(len(y_test)):
 y_pred_wfv.name = "prediction"
 y_pred_wfv.index.name = "timestamp"
 y_pred_wfv.head()
+#OUTPUT
+timestamp
+2018-03-23 03:00:00+03:00    10.383307
+2018-03-23 04:00:00+03:00     8.268941
+2018-03-23 05:00:00+03:00    15.172779
+2018-03-23 06:00:00+03:00    33.480666
+2018-03-23 07:00:00+03:00    39.576329
+Freq: H, Name: prediction, dtype: float64
 
 # Communicating results
 #Put the values for y_test and y_pred_wfv into the DataFrame df_pred_test
