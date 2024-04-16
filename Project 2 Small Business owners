@@ -1,0 +1,260 @@
+# Import libraries here
+import matplotlib.pyplot as plt
+import plotly.express as px
+import pandas as pd
+import seaborn as sns
+from sklearn.cluster import KMeans
+from sklearn.metrics import silhouette_score
+from teaching_tools.widgets import ClusterWidget, SCFClusterWidget
+from scipy.stats.mstats import trimmed_var
+from sklearn.decomposition import PCA
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+# Reading the file "data/SCFP2019.csv.gz" into the DataFrame df
+df = pd.read_csv("data/SCFP2019.csv.gz")
+print("df shape:", df.shape)
+df.head()
+#OUTPUT
+YY1	Y1	WGT	         HHSEX	AGE	AGECL	EDUC	EDCL	MARRIED	KIDS	...	NWCAT	INCCAT	ASSETCAT	NINCCAT	NINC2CAT	NWPCTLECAT	INCPCTLECAT	NINCPCTLECAT	INCQRTCAT	NINCQRTCAT
+0	1	11	6119.779308	 2	    75	6	    12	  4	    2	      0	    ...	5	    3	      6	        3	      2	        10	        6	          6	            3	        3
+1	1	12	4712.374912	 2	    75	6	    12	  4	    2	      0	    ...	5	    3	      6	        3	      1	        10	        5	          5	            2	        2
+2	1	13	5145.224455	 2	    75	6	    12	  4	    2	      0	    ...	5	    3	      6	        3	      1	        10	        5	          5	            2	        2
+3	1	14	5297.663412	 2	    75	6	    12	  4	    2	      0	    ...	5	    2     	6	        2	      1	        10	        4	          4	            2	        2
+4	1	15	4761.812371	 2	    75	6	    12	  4	    2	      0	    ...	5	    3	      6	        3	      1	        10	        5	          5	            2	        2
+5 rows × 351 columns
+
+#Calculating the proportion of respondents in df that are business owners
+prop_biz_owners = sum(df["HBUS"]) / (sum(df["HBUS"] == 0) + sum(df["HBUS"]))
+print("proportion of business owners in df:", prop_biz_owners)
+#OUTPUT
+proportion of business owners in df: 0.2740176562229531
+
+#Creating a DataFrame df_inccat that shows the normalized frequency for income categories for business owners and non-business owners
+inccat_dict = {
+    1: "0-20",
+    2: "21-39.9",
+    3: "40-59.9",
+    4: "60-79.9",
+    5: "80-89.9",
+    6: "90-100",
+}
+
+df_inccat =  (
+    df["INCCAT"]
+    .replace(inccat_dict)
+    .groupby(df["HBUS"])
+    .value_counts(normalize=True)
+    .rename("frequency")
+    .to_frame()
+    .reset_index()
+)
+
+df_inccat
+#OUTPUT
+     HBUS	INCCAT	frequency
+0	   0	  0-20	  0.210348
+1	   0	  21-39.9	0.198140
+2	   0	  40-59.9	0.189080
+3	   0	  60-79.9	0.186600
+4	   0	  90-100	0.117167
+5	   0	  80-89.9	0.098665
+6	   1	  90-100	0.629438
+7	   1	  60-79.9	0.119015
+8	   1	  80-89.9	0.097410
+9	   1	  40-59.9	0.071510
+10	 1	  21-39.9	0.041440
+11	 1	  0-20	  0.041188
+
+
+#creating a side-by-side bar chart of df_inccat
+sns.barplot(
+    x="INCCAT",
+    y="frequency",
+    hue="HBUS",
+    data=df_inccat,
+    order=inccat_dict.values()
+)
+plt.xlabel("Income Category")
+plt.ylabel("Frequency (%)")
+plt.title("Income Distribution: Business Owners vs. Non-Business Owners")
+
+#Creating a new DataFrame df_small_biz that contains only business owners whose income is below $500,000
+mask = (df["HBUS"]) & (df["INCOME"]< 500_000)
+df_small_biz = df[mask]
+print("df_small_biz shape:", df_small_biz.shape)
+df_small_biz.head()
+#OUTPUT
+YY1	Y1	WGT	             HHSEX	        AGE	AGECL	EDUC	EDCL	MARRIED	KIDS	...	
+80	17	171	7802.265717	 1	            62	4	    12	  4	    1	      0	...	
+81	17	172	8247.536301	 1	            62	4	    12	  4	    1	      0	...
+82	17	173	8169.562719	 1	            62	4	    12	  4	    1	      0	...	
+83	17	174	8087.704517	 1	            62	4	    12	  4	    1	      0	...	
+84	17	175	8276.510048	 1	            62	4	    12	  4	    1	      0	...	
+5 rows × 351 columns
+
+#Creating a histogram from the "AGE" column in df_small_biz with 10 bins
+df_small_biz["AGE"].hist(bins=10)
+plt.xlabel("Age")
+plt.ylabel("Frequency (count)")
+plt.title("Small Business Owners: Age Distribution")
+#OUTPUT/ ATTACHED ON THE BELOW DOCUMENT
+
+# Calculating the variance for all the features in df_small_biz, and creating a Series top_ten_var with the 10 features with the largest variance
+top_ten_var = df_small_biz.var().sort_values().tail(10)
+top_ten_var
+#OUTPUT
+EQUITY      1.005088e+13
+FIN         2.103228e+13
+KGBUS       5.025210e+13
+ACTBUS      5.405021e+13
+BUS         5.606717e+13
+KGTOTAL     6.120760e+13
+NHNFIN      7.363197e+13
+NFIN        9.244074e+13
+NETWORTH    1.424450e+14
+ASSET       1.520071e+14
+dtype: float64
+
+#Calculate the trimmed variance for the features in df_small_biz, Excluding top and bottom 10% observations
+top_ten_trim_var = df_small_biz.apply(trimmed_var, limits=(0.1, 0.1)).sort_values().tail(10)
+top_ten_trim_var
+#OUTPUT
+EQUITY      1.177020e+11
+KGBUS       1.838163e+11
+FIN         3.588855e+11
+KGTOTAL     5.367878e+11
+ACTBUS      5.441806e+11
+BUS         6.531708e+11
+NHNFIN      1.109187e+12
+NFIN        1.792707e+12
+NETWORTH    3.726356e+12
+ASSET       3.990101e+12
+dtype: float64
+
+#Using plotly express to create a horizontal bar chart of top_ten_trim_var
+fig = px.bar(
+   plt.xlabel=("Trimmed Variance [$]"),
+   plt.ylabel=("Feature"),
+   plt.title=("Small Business Owners: High Variance Features")
+)
+#OUTPUT ATTACHED ON THE BELOW DOCUMENT
+
+
+#Generating a list high_var_cols with the column names of the five features with the highest trimmed variance
+high_var_cols = top_ten_trim_var.tail(5).index.to_list()
+high_var_cols
+#OUTPUT
+['BUS', 'NHNFIN', 'NFIN', 'NETWORTH', 'ASSET']
+
+
+#BUILDING MODEL
+#Using a for loop to build and train a K-Means model where n_clusters ranges from 2 to 12 (inclusive)
+n_clusters = range(2, 13)
+inertia_errors = []
+silhouette_scores = []
+
+# Use for loop
+for k in n_clusters:
+    # Build
+    model = make_pipeline(StandardScaler(), KMeans(n_clusters=k, random_state=42))
+    # Train
+    model.fit(X)
+    # Calculate inertia
+    inertia_errors.append(model.named_steps["kmeans"].inertia_)
+    # Calculate silhouette score
+    silhouette_scores.append(
+        silhouette_score(X, model.named_steps["kmeans"].labels_)
+    )
+
+print("Inertia:", inertia_errors[:11])
+print()
+print("Silhouette Scores:", silhouette_scores[:3])
+#OUTPUT
+Inertia: [5765.863949365048, 3070.4294488357455, 2220.292185089684, 1777.4635570665569, 1441.6688198736526, 1173.3701169574997, 1050.6442581214994, 881.6578582242295, 774.6415287114439, 666.0292729241072, 624.442491985052]
+
+
+#Using plotly express to create a line plot that shows the values of inertia_errors as a function of n_clusters
+fig = px.line(
+    x=n_clusters, y=inertia_errors, title=("K-Means Model: Inertia vs Number of Clusters")
+)
+fig.update_layout(xaxis_title="Number of Clusters", yaxis_title="Inertia")
+#OUTPUT ATTACHED IN THE BELOW DOCUMENT
+
+#Using plotly express to create a line plot that shows the values of silhouette_scores as a function of n_clusters
+fig = px.line(
+    x=n_clusters, y=silhouette_scores, title=("K-Means Model: Silhouette Score vs Number of Clusters")
+)
+fig.update_layout(xaxis_title="Number of Clusters", yaxis_title="Silhouette Score")
+
+
+#TRAINING MODEL WITH 3 CLUSTERS
+#K-MEANS MODEL NAMED FINAL MODEL
+final_model =  make_pipeline(
+    StandardScaler(),
+    KMeans(n_clusters=3, random_state=42)
+)
+final_model.fit(X)
+#OUTPUT
+
+
+#COMMUNICATING RESULTS
+#Creating a DataFrame xgb that contains the mean values of the features in X for the 3 clusters in the final_model
+labels = final_model.named_steps["kmeans"].labels_
+xgb = X.groupby(labels).mean()
+xgb
+#OUTPUT
+  BUS	          NHNFIN	      NFIN	        NETWORTH	    ASSET
+0	7.367185e+05	1.002199e+06	1.487967e+06	2.076003e+06	2.281249e+06
+1	1.216152e+07	1.567619e+07	1.829123e+07	2.310024e+07	2.422602e+07
+2	6.874479e+07	8.202115e+07	9.169652e+07	1.134843e+08	1.167529e+08
+​
+
+#Using plotly express to create a side-by-side bar chart from xgb that shows the mean of the features in X for each of the clusters in the final_model
+fig = px.bar(
+    xgb,
+    barmode="group",
+    title="Your Title"
+)
+fig.update_layout(xaxis_title="Your x_label", yaxis_title="Your y_label")
+#OUTPUT ATTACHED ON THE BELOW DOCUMENT
+
+
+#Creating a PCA transformer, use it to reduce the dimensionality of the data in X to 2, and then put the transformed data into a DataFrame named X_pca
+pca = PCA(n_components=2, random_state=42)
+
+X_t = pca.fit_transform(X)
+
+X_pca = pd.DataFrame(X_t, columns=["PC1", "PC2"])
+
+print("X_pca shape:", X_pca.shape)
+X_pca.head()
+#OUTPUT
+X_pca shape: (4364, 2)
+   PC1	         PC2
+0	-6.220648e+06	-503841.638839
+1	-6.222523e+06	-503941.888901
+2	-6.220648e+06	-503841.638839
+3	-6.224927e+06	-504491.429465
+4	-6.221994e+06	-503492.598399
+
+
+#Using plotly express to create a scatter plot of X_pca using seaborn
+fig = px.scatter(
+    data_frame=X_pca,
+    x="PC1",
+    y="PC2",
+    color=labels.astype(str),
+    title="PCA Representation of Clusters"
+)
+fig.update_layout(xaxis_title="PC1", yaxis_title="PC2")
+#OUTPUT ATTACHED IN THE BELOW DOCUMENT
+
+
+
+
+
+
+
+
+
