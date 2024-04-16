@@ -1,0 +1,222 @@
+# Import libraries here
+import warnings
+from glob import glob
+import pandas as pd
+import seaborn as sns
+import wqet_grader
+from category_encoders import OneHotEncoder
+from IPython.display import VimeoVideo
+from ipywidgets import Dropdown, FloatSlider, IntSlider, interact
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LinearRegression, Ridge # noqa F401
+from sklearn.metrics import mean_absolute_error
+from sklearn.pipeline import make_pipeline
+from sklearn.utils.validation import check_is_fitted
+import matplotlib.pyplot as plt
+
+
+#Creating a wrangle function that takes the name of a CSV file as input and returns a DataFrame.
+# The function will:
+#Subset the data in the CSV file and return only apartments in Mexico City ("Distrito Federal") that cost less than $100,000.
+#Remove outliers by trimming the bottom and top 10% of properties in terms of "surface_covered_in_m2".
+#Drop columns that are more than 50% null values.
+#Drop columns containing low- or high-cardinality categorical values.
+#Drop any columns that would create issues of multicollinearity
+def wrangle(filepath):
+    df = pd.read_csv(filepath)
+    mask1 = (df['property_type'] == 'apartment')
+    mask2 = (df['price_aprox_usd'] < 100000)
+    mask3 = (df['place_with_parent_names'].str.contains('Distrito Federal'))
+    df = df[mask1 & mask2 & mask3]
+    low, high = df['surface_covered_in_m2'].quantile([0.1, 0.9])
+    maskArea = df['surface_covered_in_m2'].between(low, high)
+    df = df[maskArea]
+    df[['lat', 'lon']] = df['lat-lon'].str.split(',', expand=True).astype(float)
+    df = df.drop(columns='lat-lon')
+    df['borough'] = df['place_with_parent_names'].str.split('|', expand=True)[1]
+    df = df.drop(columns='place_with_parent_names')
+    columns_na = [i for i in df.columns if df[i].isna().sum() > len(df) // 2]
+    df = df.drop(columns = columns_na)
+    list_card = ["operation", "property_type", "currency", "properati_url"]
+    df = df.drop(columns = list_card)
+#leakage
+    highlow_cardinality = ['price', 'price_aprox_local_currency', 'price_per_m2']
+    df = df.drop(columns = highlow_cardinality)
+    return df
+
+#Using glob to create the list files. It should contain the filenames of all the Mexico City real estate CSVs
+files = glob('data/mexico-city-real-estate-[0-5].csv')
+files
+#OUTPUT
+['data/mexico-city-real-estate-1.csv',
+ 'data/mexico-city-real-estate-4.csv',
+ 'data/mexico-city-real-estate-2.csv',
+ 'data/mexico-city-real-estate-5.csv',
+ 'data/mexico-city-real-estate-3.csv']
+
+
+#Combining a wrangle function, a list comprehension, and pd.concat to create a DataFrame df
+#contain all the properties from the five CSVs in files.
+frame = []
+for i in files:
+    df = wrangle(i)
+    frame.append(df)
+
+df = pd.concat(frame)
+print(df.info())
+df.head()
+#OUTPUT
+<class 'pandas.core.frame.DataFrame'>
+Int64Index: 5473 entries, 11 to 4622
+Data columns (total 5 columns):
+ #   Column                 Non-Null Count  Dtype  
+---  ------                 --------------  -----  
+ 0   price_aprox_usd        5473 non-null   float64
+ 1   surface_covered_in_m2  5473 non-null   float64
+ 2   lat                    5149 non-null   float64
+ 3   lon                    5149 non-null   float64
+ 4   borough                5473 non-null   object 
+dtypes: float64(4), object(1)
+memory usage: 256.5+ KB
+None
+    price_aprox_usd	surface_covered_in_m2	lat	       lon	      borough
+11	94022.66	      57.0	               23.634501	-102.552788	Benito Juárez
+20	70880.12	      56.0	               19.402413	-99.095391	Iztacalco
+21	68228.99	      80.0	               19.357820	-99.149406	Benito Juárez
+22	24235.78	      60.0	               19.504985	-99.208557	Azcapotzalco
+26	94140.20	      50.0	               19.354219	-99.126244	Coyoacán
+
+
+#Creating a histogram showing the distribution of apartment prices ("price_aprox_usd") in df
+plt.hist(df["price_aprox_usd"])
+
+
+# Label axes
+plt.xlabel("Area [sq meters]")
+plt.ylabel('Count')
+
+# Add title
+plt.title("Distribution of Apartment Sizes")
+
+
+# Creating a scatter plot that shows apartment price ("price_aprox_usd") as a function of apartment size ("surface_covered_in_m2")
+# Build scatter plot
+plt.scatter(x= df['surface_covered_in_m2'], y=df['price_aprox_usd'],)
+
+# Label axes
+plt.ylabel('Price [USD]')
+plt.xlabel('Area [sq meters]')
+# Add title
+plt.title('Mexico City: Price vs. Area')
+
+
+#Split
+#Creating a feature matrix X_train and target vector y_train
+df.columns
+feature = 'price_aprox_usd'
+X_train = df[['surface_covered_in_m2', 'lat', 'lon', 'borough']]
+y_train = df[feature]
+
+
+#Building a Model
+#Calculating the baseline mean absolute error for the model
+y_mean = y_train.mean()
+y_pred_baseline = [y_mean] * len(y_train)
+baseline_mae = mean_absolute_error(y_train, y_pred_baseline)
+print("Mean apt price:", y_mean)
+print("Baseline MAE:", baseline_mae
+#OUTPUT
+Mean apt price: 54246.5314982642
+Baseline MAE: 17239.93947588829
+
+
+#Create a pipeline named model that contains all the transformers and fitting the model for training data
+# Build Model
+model = make_pipeline(
+OneHotEncoder(use_cat_names = True),
+SimpleImputer(),
+Ridge()
+)
+# Fit model
+model.fit(X_train, y_train)
+#OUTPUT
+Pipeline > OneHotEncoder > SimpleImputer >Ridge
+
+
+#Evaluating
+#Reading the CSV file mexico-city-test-features.csv into the DataFrame X_test
+X_test = pd.read_csv('./data/mexico-city-test-features.csv')
+print(X_test.info())
+X_test.head()
+#OUTPUT
+<class 'pandas.core.frame.DataFrame'>
+RangeIndex: 1041 entries, 0 to 1040
+Data columns (total 4 columns):
+ #   Column                 Non-Null Count  Dtype  
+---  ------                 --------------  -----  
+ 0   surface_covered_in_m2  1041 non-null   float64
+ 1   lat                    986 non-null    float64
+ 2   lon                    986 non-null    float64
+ 3   borough                1041 non-null   object 
+dtypes: float64(3), object(1)
+memory usage: 32.7+ KB
+None
+surface_covered_in_m2	lat	lon	borough
+0	60.0	19.493185	-99.205755	Azcapotzalco
+1	55.0	19.307247	-99.166700	Coyoacán
+2	50.0	19.363469	-99.010141	Iztapalapa
+3	60.0	19.474655	-99.189277	Azcapotzalco
+4	74.0	19.394628	-99.143842	Benito Juárez
+
+
+#Using a model to generate a Series of predictions for X_test
+0    53538.366480
+1    53171.988369
+2    34263.884179
+3    53488.425607
+4    68738.924884
+dtype: float64
+
+
+#Communicating Results
+# Create a Series named feat_imp
+#index contain the names of all the features your model considers when making predictions
+intercept = model.named_steps["ridge"].intercept_
+
+# retrieve coefficients
+coefficients = model.named_steps["ridge"].coef_
+
+# retrieve names
+features = model.named_steps["onehotencoder"].get_feature_names()
+
+# create a series of names and values
+feat_imp = pd.Series(coefficients, index=features)
+feat_imp
+#OUTPUT
+surface_covered_in_m2               291.654156
+lat                                 478.901375
+lon                               -2492.221814
+borough_Benito Juárez             13778.188880
+borough_Iztacalco                   405.403127
+borough_Azcapotzalco               2459.288646
+borough_Coyoacán                   3737.561001
+borough_Álvaro Obregón             3275.121061
+borough_Iztapalapa               -13349.017448
+borough_Cuauhtémoc                 -350.531990
+borough_Tláhuac                  -14166.869486
+borough_Miguel Hidalgo             1977.314718
+borough_Venustiano Carranza       -5609.918629
+borough_Tlalpan                   10319.429804
+borough_Gustavo A. Madero         -6637.429757
+borough_Xochimilco                  929.857400
+borough_La Magdalena Contreras    -5925.666450
+borough_Cuajimalpa de Morelos      9157.269123
+dtype: float64
+
+
+#Creating a horizontal bar chart that shows the 10 most influential coefficients for your model
+plt.barh(features,feat_imp)
+plt.title('Feature Importances for Apartment Price')
+plt.ylabel('Feature')
+plt.xlabel('Importance [USD]')
+plt.show()
