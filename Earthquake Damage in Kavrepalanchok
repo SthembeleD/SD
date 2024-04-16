@@ -1,0 +1,292 @@
+import sqlite3
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+from category_encoders import OneHotEncoder
+from category_encoders import OrdinalEncoder
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline, make_pipeline
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+
+
+#connecting nepal.sqlite database
+%load_ext sql
+%sql sqlite:////home/jovyan/nepal.sqlite
+
+
+# Join the unique building IDs from Kavrepalanchok in id_map, all the columns from building_structure, and the damage_grade
+# ename the building_id column in id_map as b_id and limit your results to the first five rows
+%%sql
+SELECT distinct(i.building_id) AS b_id,   # building_id column of table i aliased as b_id
+     s.*,     # selects all columns of table s
+     d.damage_grade   # select damage_grade column of table d
+FROM id_map AS i
+JOIN building_structure AS s ON i.building_id = s.building_id
+JOIN building_damage AS d ON i.building_id = d.building_id
+WHERE district_id = 3
+LIMIT 5
+
+
+#Creating a wrangle function that will Create a "severe_damage" column, where all buildings with a damage grade greater than 3 should be encoded as 1
+#All other buildings should be encoded at 0
+#Droping any columns that could cause issues with leakage or multicollinearity in the model
+def wrangle(db_path):
+    # Connect to database using connect method
+    conn = sqlite3.connect(db_path)
+
+    # Construct query
+    query = """
+        SELECT distinct(i.building_id) AS b_id,
+           s.*,
+           d.damage_grade
+        FROM id_map AS i
+        JOIN building_structure AS s ON i.building_id = s.building_id
+        JOIN building_damage AS d ON i.building_id = d.building_id
+        WHERE district_id = 3
+    """
+
+    # Read query results into DataFrame
+    df = pd.read_sql(query, conn, index_col="b_id")
+
+    # Identify leaky columns
+    drop_cols = [col for col in df.columns if "post_eq" in col]
+    
+    # Create binary target
+    df["damage_grade"] = df["damage_grade"].str[-1].astype(int)
+    df["severe_damage"] = (df["damage_grade"] > 3).astype(int)    # encode as 0's and 1's
+    
+    # Drop old target
+    drop_cols.append("damage_grade")
+    
+    # Drop multicolinearity column
+    drop_cols.append("count_floors_pre_eq")
+    
+    # Drop high categorical features
+    drop_cols.append("building_id")
+    
+    # Drop columns
+    df.drop(columns=drop_cols, inplace=True)
+    
+    return df
+
+
+#Using a  wrangle function to query the database at "/home/jovyan/nepal.sqlite" and return cleaned results.
+#df =  df = wrangle("/home/jovyan/nepal.sqlite")
+df.head()
+#OUTPUT
+      age_building plinth_area_sq_ft	height_ft_pre_eq	land_surface_condition	foundation_type	        roof_type	                ground_floor_type	    other_floor_type	position	  plan_configuration	superstructure	severe_damage
+b_id												
+87473	15	         382	             18	                Flat	                  Mud mortar-Stone/Brick	Bamboo/Timber-Light roof	Mud	TImber/Bamboo-Mud	Not attached	    Rectangular	Stone,             mud mortar	      1
+87479	12	         328	             7	                Flat	                  Mud mortar-Stone/Brick	Bamboo/Timber-Light roof	Mud	Not applicable	  Not attached	    Rectangular	Stone,             mud mortar	      1
+87482	23	         427	             20	                Flat	                  Mud mortar-Stone/Brick	Bamboo/Timber-Light roof	Mud	TImber/Bamboo-Mud	Not attached	    Rectangular	Stone,             mud mortar	      1
+87491	12	         427	             14	                Flat	                  Mud mortar-Stone/Brick	Bamboo/Timber-Light roof	Mud	TImber/Bamboo-Mud	Not attached	    Rectangular	Stone,             mud mortar	      1
+87496	32	         360	             18	                Flat	                  Mud mortar-Stone/Brick	Bamboo/Timber-Light roof	Mud	TImber/Bamboo-Mud	Not attached	    Rectangular	Stone,             mud mortar	      1
+
+
+#Explore
+#Checking if the classes of the dataset are balanced
+#creating a bar chart with the normalized value counts from the "severe_damage"
+# Plot value counts of `"severe_damage"`
+df["severe_damage"].value_counts(normalize=True).plot(
+    kind="bar", xlabel="Severe Damage", ylabel="Relative Frequency", title="Class Balance"
+);
+
+
+#checking if there is a relationship between the footprint size of a building and damage sustained in the earthquake
+#using seaborn to create a boxplot that shows distribution for both groups
+sns.boxplot(x="severe_damage", y="plinth_area_sq_ft", data=df)
+plt.xlabel("Severe Damage")
+plt.ylabel("Plinth Area [sq. ft.]")
+plt.title("Kavrepalanchok, Plinth Area vs Building Damage");
+
+
+#Checking if buildings with certain roof types are more likely to suffer severe damage
+#Creating a pivot table of df
+roof_pivot = pd.pivot_table(
+    df, index="roof_type", values="severe_damage", aggfunc=np.mean    # roof_type: column in table
+).sort_values(by="severe_damage")
+roof_pivot
+#OUTPUT
+                        
+roof_type	                severe_damage
+RCC/RB/RBC	              0.040715
+Bamboo/Timber-Heavy roof	0.569477
+Bamboo/Timber-Light roof	0.604842
+
+
+#Creating  a feature matrix X and target vector y.target is "severe_damage".
+X = df.drop(columns="severe_damage")    # feature matrix: all columns apart from severe_damage
+y = df["severe_damage"]       # target vector
+print("X shape:", X.shape)
+print("y shape:", y.shape)
+#OUTPUT
+X shape: (76533, 11)
+y shape: (76533,)
+
+
+#Dividing your dataset into training and validation sets using a randomized split. 
+#Your validation set should be 20% of your data.
+X_train, X_val, y_train, y_val =  train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+print("X_train shape:", X_train.shape)
+print("y_train shape:", y_train.shape)
+print("X_val shape:", X_val.shape)
+print("y_val shape:", y_val.shape)
+#OUTPUT
+X_train shape: (61226, 11)
+y_train shape: (61226,)
+X_val shape: (15307, 11)
+y_val shape: (15307,)
+
+
+#Building Model
+#Calculating the baseline accuracy score for the model
+acc_baseline = y_train.value_counts(normalize=True).max()   # normalize gives you the relative freq
+print("Baseline Accuracy:", round(acc_baseline, 2))
+#OUTPUT
+Baseline Accuracy: 0.85
+
+
+#Creating a model model_lr that uses logistic regression to predict building damage.
+#including an appropriate encoder for categorical features.
+model_lr = make_pipeline(
+    OneHotEncoder(use_cat_names=True),
+    LogisticRegression(max_iter=1000)   
+)
+# Fit model to training data
+model_lr.fit(X_train, y_train)
+#OUTPUT
+Pipeline > OneHotEncoder > LogisticRegression
+
+
+#Calculating training and validation accuracy score for model_lr.
+lr_train_acc = accuracy_score(y_train, model_lr.predict(X_train))
+lr_val_acc = model_lr.score(X_val, y_val)
+print("Logistic Regression, Training Accuracy Score:", lr_train_acc)
+print("Logistic Regression, Validation Accuracy Score:", lr_val_acc)
+#OUTPUT
+Logistic Regression, Training Accuracy Score: 0.6513735994512135
+Logistic Regression, Validation Accuracy Score: 0.6522506042986869
+
+
+#Creating a for loop to train and evaluate the model model_dt at all depths from 1 to 15
+#Checking if a decision tree model will perform better than logistic regression
+depth_hyperparams = range(1, 16)    # for max_depth
+training_acc = []
+validation_acc = []
+for d in depth_hyperparams:
+    model_dt = make_pipeline(
+        OrdinalEncoder(), 
+        DecisionTreeClassifier(max_depth= d, random_state=42)
+    )
+    # Fit model to training data
+    model_dt.fit(X_train, y_train)
+    # Calculate training accuracy score and append to `training_acc`
+    training_acc.append(model_dt.score(X_train, y_train))
+    # Calculate validation accuracy score and append to `training_acc`
+    validation_acc.append(model_dt.score(X_val, y_val))
+
+print("Training Accuracy Scores:", training_acc[:6])
+print("Validation Accuracy Scores:", validation_acc[:6])
+#OUTPUT
+Training Accuracy Scores: [0.6303041191650606, 0.6303041191650606, 0.642292490118577, 0.653529546271192, 0.6543951915852743, 0.6576617776761506]
+Validation Accuracy Scores: [0.6350035931273273, 0.6350035931273273, 0.6453909975828053, 0.6527732410008493, 0.6529039001763899, 0.6584569151368654]
+
+
+#ploting the validation curve for model_dt using values in training_acc and validation_acc
+plt.plot(depth_hyperparams, training_acc, label="Training")
+plt.plot(depth_hyperparams, validation_acc, label="validation")
+plt.xlabel("Max Depth")
+plt.ylabel("Accuracy Score")
+plt.title("Validation Curve, Decision Tree Model")
+plt.legend();
+
+
+# build & fit again
+final_model_dt = make_pipeline(
+    OrdinalEncoder(), 
+    DecisionTreeClassifier(max_depth=10, random_state=42)
+)
+# Fit model to training data
+final_model_dt.fit(X, y)  
+
+#Building and training a new decision tree model final_model_dt using values max_depth
+final_model_dt.fit(X, y)
+#OUTPUT
+Pipeline(steps=[('ordinalencoder',
+                 OrdinalEncoder(cols=['land_surface_condition',
+                                      'foundation_type', 'roof_type',
+                                      'ground_floor_type', 'other_floor_type',
+                                      'position', 'plan_configuration',
+                                      'superstructure'],
+                                mapping=[{'col': 'land_surface_condition',
+                                          'data_type': dtype('O'),
+                                          'mapping': Flat              1
+Moderate slope    2
+Steep slope       3
+NaN              -2
+dtype: int64},
+                                         {'col': 'foundation_type',
+                                          'dat...
+Others                              9
+Building with Central Courtyard    10
+NaN                                -2
+dtype: int64},
+                                         {'col': 'superstructure',
+                                          'data_type': dtype('O'),
+                                          'mapping': Stone, mud mortar        1
+Adobe/mud                2
+Brick, cement mortar     3
+Brick, mud mortar        4
+RC, non-engineered       5
+Timber                   6
+Bamboo                   7
+Stone, cement mortar     8
+RC, engineered           9
+Other                   10
+Stone                   11
+NaN                     -2
+dtype: int64}])),
+                ('decisiontreeclassifier',
+                 DecisionTreeClassifier(max_depth=10, random_state=42))])
+
+
+#How does model perform on the test set
+X_test = pd.read_csv("data/kavrepalanchok-test-features.csv", index_col="b_id")
+y_test_pred = pd.Series(final_model_dt.predict(X_test))
+y_test_pred[:5]
+#OUTPUT
+0    1
+1    1
+2    0
+3    1
+4    0
+dtype: int64
+
+
+#Checking most important features for finsl_model_dt
+#Creating a Series Gini feat_imp
+features = X_train.columns
+importances = final_model_dt.named_steps["decisiontreeclassifier"].feature_importances_
+feat_imp = pd.Series(importances, index=features).sort_values()
+feat_imp.head()
+#OUTPUT
+plan_configuration        0.004032
+position                  0.007129
+land_surface_condition    0.008241
+ground_floor_type         0.009741
+foundation_type           0.010620
+dtype: float64
+​
+#Creating a horizontal bar chart of feat_imp
+#Checking  relationship between this plot and the exploratory data analysis
+feat_imp.plot(kind="barh")
+plt.xlabel("importance")
+plt.ylabel("label")
+plt.title("Fearure Importance")
+
+  
