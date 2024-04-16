@@ -23,3 +23,127 @@ dar = db["dar-es-salaam"]
 for collection in db.list_collections():
     print(collection['name'])
 
+# Creating a Wrangle function to extract all sites with most total readings
+# The function will Remove all outliers readings that are above 100 
+# ||Resample Data, impute missing values and return series y
+
+def wrangle(collection):
+    results = collection.find(
+        {"metadata.site": 11, "metadata.measurement": "P2"},
+        projection={"P2": 1, "timestamp": 1, "_id": 0},   # ---> focus/ limit to only "P2" and timestamp
+    )
+df = pd.DataFrame(results).set_index("timestamp")
+    # Localize time
+    df.index = df.index.tz_localize("UTC").tz_convert("Africa/Dar_es_Salaam")
+    
+    # Remove outliers
+    df = df[df["P2"] < 100]
+    
+    # Resample to 1hour period, fill in missing values
+    y = df["P2"].resample("1H").mean().fillna(method='ffill')
+    return y
+
+# Create a time series plot of the readings in y
+fig, ax = plt.subplots(figsize=(15, 6))
+y.plot( #used y instead of y["P2"] since our y is a pd Series
+xlabel="Date",
+ylabel="PM2.5 Level",
+title="Dar es Salaam PM2.5 Levels",
+)
+
+# Ploting rolling average of readings in y
+fig, ax = plt.subplots(figsize=(15, 6))
+fig, ax = plt.subplots(figsize=(15, 6))
+y.rolling(168).mean().plot(ax=ax)
+plt.xlabel="Date"
+plt.ylabel="PM2.5 Level"
+plt.title="Dar es Salaam PM2.5 Levels",
+
+# Creating an ACF plot for the data in y
+fig, ax = plt.subplots(figsize=(15, 6))
+fig, ax = plt.subplots(figsize=(15, 6))
+plot_acf(y, ax=ax)
+plt.xlabel= "Lag [hours]"
+plt.ylabel = "Correlation Coefficient"
+plt.title = "Dar es Salaam PM2.5 Readings, ACF"
+
+#SPLIT y INTO TRAINIG AND TEST SETS, 90% OF THE DATA BEING TRAINING DATA WHILE 10% BEING TEST DATA
+cutoff_test = int(len(y)*.9)
+y_train = y[:cutoff_test]
+y_test = y[cutoff_test:]
+print("y_train shape:", y_train.shape)
+print("y_test shape:", y_test.shape)
+
+#BUILDING A MODEL 
+#CALCULATING BASELINE MEAN ABSOLUTE ERROR FOR MODEL
+y_train_mean = y_train.mean()
+y_pred_baseline = [y_train_mean] * len(y_train)
+mae_baseline = mean_absolute_error(y_train, y_pred_baseline)
+print("Mean P2 Reading:", y_train_mean)
+print("Baseline MAE:", mae_baseline)
+
+
+# USING AUTOReg MODEL TO PREDICT PM2.5 READINGS USING FOR LOOP TO TRAIN AR MODEL
+# EACH TIME A MODEL IS TRAINED , MEAN ABSOLUTE ERROR WILL ALSO BE CALCULATED
+from statsmodels.tsa.ar_model import AutoReg
+from sklearn.metrics import mean_absolute_error
+
+p_params = range(1, 31)
+maes = []
+for p in p_params:
+    #Train model
+    model = AutoReg(y_train, lags=p).fit()
+    
+    #Generate in-sample pred
+    y_pred = model.predict().dropna()
+        
+    #Calculate mae
+    mae = mean_absolute_error(y_train.iloc[p:], y_pred)
+    maes.append(mae)
+    mae_series = pd.Series(maes, name="mae", index=p_params)
+mae_series.head()
+
+#  Calculate the training residuals for best_model and assign the result to y_train_resid
+y_pred = best_model.predict().dropna()
+y_train_resid = best_model.resid
+y_train_resid.name = "residuals"
+y_train_resid.head()
+y_train_resid = y_train.loc[y_pred.index] - y_pred
+y_train_resid.name = "residuals"
+
+# Creatngi a histogram of y_train_resid
+y_train_resid.hist()
+plt.xlabel = "Residuals"
+plt.ylabel = "Frequency"
+plt.title = "Best Model, Training Residuals"
+
+# Performing walk-forward validation for your model for the entire test set y_test
+y_pred_wfv = pd.Series()
+history = y_train.copy()
+for i in range(len(y_test)):
+    model = AutoReg(history, lags=best_p).fit()
+    next_pred = model.forecast()      # next value after end of history
+    y_pred_wfv = y_pred_wfv.append(next_pred)
+    history = history.append(y_test[next_pred.index])
+    
+y_pred_wfv.name = "prediction"
+y_pred_wfv.index.name = "timestamp"
+y_pred_wfv.head()
+
+# Communicating results
+#Put the values for y_test and y_pred_wfv into the DataFrame df_pred_test
+
+import plotly.express as px
+import pandas as pd
+
+# Put test and walk-forward validation values
+# in a dataframe and plot df
+df_pred_test = pd.DataFrame(
+    {"y_test": y_test, "y_pred_wfv": y_pred_wfv}
+)
+fig = px.line(df_pred_test, labels={"value": "PM2.5"})
+fig.update_layout(
+    title="Dar es Salaam, WFV Predictions",
+    xaxis_title="Date",
+    yaxis_title="PM2.5 Level",
+)
