@@ -1,0 +1,221 @@
+from sklearn.base import ClassifierMixin
+from sklearn.pipeline import Pipeline
+import gzip
+import json
+import pickle
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
+import wqet_grader
+from imblearn.over_sampling import RandomOverSampler
+from imblearn.under_sampling import RandomUnderSampler
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import (
+    ConfusionMatrixDisplay,
+    classification_report,
+    confusion_matrix,
+)
+from sklearn.pipeline import make_pipeline
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import GridSearchCV, cross_val_score, train_test_split
+import ipywidgets as widgets
+from ipywidgets import interact
+from sklearn.ensemble import GradientBoostingClassifier
+from teaching_tools.widgets import ConfusionMatrixWidget
+
+
+#importing and loading contents of the data "data/taiwan-bankruptcy-data.json.gz" and assign it to the variable taiwan_data
+with gzip.open("data/taiwan-bankruptcy-data.json.gz", "r") as f:
+    taiwan_data = json.load(f)
+
+# Extracting keys from a dict
+taiwan_data_keys = taiwan_data.keys()
+print(taiwan_data_keys)
+print(type(taiwan_data))
+#OUTPUT
+dict_keys(['schema', 'metadata', 'observations'])
+<class 'dict'>
+
+#Extracting key names from taiwan_data
+taiwan_data_keys = taiwan_data.keys()
+print(taiwan_data_keys)
+#OUTPUT
+dict_keys(['schema', 'metadata', 'observations'])
+
+#Calculating how many companies are in taiwan_data
+n_companies = len(taiwan_data["observations"])
+print(n_companies
+#OUTPUT
+6137
+
+#Calculating number of features associated with each company
+n_features = len(taiwan_data["observations"][0])
+print(n_features)
+#OUTPUT
+97
+
+#Creating a wrangle function that takes as input the path of a compressed JSON file and returns the file's contents as a DataFrame
+def wrangle(filePath):
+    # Open compressed file, load to dict
+    with gzip.open(filePath, "r") as f:
+        data = json.load(f)
+        
+    # Dictionary --> DataFrame, set index
+    df = pd.DataFrame().from_dict(data["observations"]).set_index("id")
+    return df
+df = wrangle("data/taiwan-bankruptcy-data.json.gz")
+print("df shape:", df.shape)
+df.head()
+#OUTPUT
+df shape: (6137, 96)
+bankrupt feat_1	  feat_2	  feat_3	  feat_4	  feat_5	  feat_6	  feat_7	  feat_8	  feat_9	   ...	feat_86	feat_87	 feat_88	  feat_89	  feat_90	  feat_91	  feat_92	  feat_93	  feat_94	feat_95
+id																					
+1	True	0.370594	0.424389	0.405750	0.601457	0.601457	0.998969	0.796887	0.808809	0.302646	...	0.716845	0.009219	0.622879	0.601453	0.827890	0.290202	0.026601	0.564050	1     	0.016469
+2	True	0.464291	0.538214	0.516730	0.610235	0.610235	0.998946	0.797380	0.809301	0.303556	...	0.795297	0.008323	0.623652	0.610237	0.839969	0.283846	0.264577	0.570175	1	      0.020794
+3	True	0.426071	0.499019	0.472295	0.601450	0.601364	0.998857	0.796403	0.808388	0.302035	...	0.774670	0.040003	0.623841	0.601449	0.836774	0.290189	0.026555	0.563706	1	      0.016474
+4	True	0.399844	0.451265	0.457733	0.583541	0.583541	0.998700	0.796967	0.808966	0.303350	...	0.739555	0.003252	0.622929	0.583538	0.834697	0.281721	0.026697	0.564663	1	      0.023982
+5	True	0.465022	0.538432	0.522298	0.598783	0.598783	0.998973	0.797366	0.8
+
+#Checking if there are any missing values in the dataset
+#Creating a series where index contains the same name of the columns in df
+nans_by_col = pd.Series(df.isnull().sum(), index=df.columns)
+print("nans_by_col shape:", nans_by_col.shape)
+nans_by_col.head()
+#OUTPUT
+nans_by_col shape: (96,)
+bankrupt    0
+feat_1      0
+feat_2      0
+feat_3      0
+feat_4      0
+dtype: int64
+
+
+#Creating a bar chart that shows the normalized value counts for the column df["bankrupt"]
+f["bankrupt"].value_counts(normalize=True).plot(
+    kind = "bar",
+    xlabel = "Bankrupt",
+    ylabel = "Frequency",
+    title = "Class Balance"
+);
+
+
+#Creating a  feature matrix X and target vector y. target is "bankrupt".
+target = "bankrupt"
+X = df.drop(columns="bankrupt")
+y = df[target]
+
+
+# Training and test split
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+print("X shape:", X.shape)
+print("y shape:", y.shape)
+#OUTPUT
+X shape: (6137, 95)
+y shape: (6137,)
+
+
+#performing random over-sampling on the training data
+#set random_state to 42
+over_sampler = RandomOverSampler(random_state=42)
+X_train_over, y_train_over = over_sampler.fit_resample(X_train, y_train)
+print("X_train_over shape:", X_train_over.shape)
+X_train_over.head()
+#OUTPUT
+X_train_over shape: (9512, 95)
+
+#Creating a classifier clf that can be trained on (X_train_over, y_train_over
+clf = GradientBoostingClassifier(random_state=42)
+clf
+#OUTPUT
+GradientBoostingClassifier > GradientBoostingClassifier(random_state=42)
+
+#Performing cross-validation with your classifier using the over-sampled training data
+cv_scores = cross_val_score(clf, X_train_over, y_train_over, cv=5, n_jobs=-1)
+print(cv_scores)
+#OUTPUT
+[0.96952181 0.97162375 0.97003155 0.97160883 0.96845426]
+
+
+#Fit model to the over-sampled training data.
+model.fit(X_train_over, y_train_over)
+#OUTPUT
+Fitting 5 folds for each of 9 candidates, totalling 45 fits
+GridSearchCV(cv=5, estimator=GradientBoostingClassifier(random_state=42),
+             n_jobs=-1,
+             param_grid={'max_depth': range(2, 5),
+                         'n_estimators': range(20, 31, 5)},
+             verbose=1)
+
+#Extracting the cross-validation results from the model, and load them into a DataFrame named cv_results
+cv_results = pd.DataFrame(model.cv_results_)
+cv_results.head(5
+
+#Extracting the best hyperparameters from the model and assign them to best_params.
+best_params = model.best_params_
+print(best_params)
+#OUTPUT
+{'max_depth': 4, 'n_estimators': 30}
+
+
+#Calculating accuracy  of the model
+acc_train = model.score(X_train, y_train)
+acc_test = model.score(X_test, y_test)
+
+print("Model Training Accuracy:", round(acc_train, 4))
+print("Model Test Accuracy:", round(acc_test, 4))
+
+
+#Ploting a confusion matrix that shows how the model performed on the test set.
+ConfusionMatrixDisplay.from_estimator(model, X_test, y_test);
+
+
+# Generating a classification report for the model's performance on the test data
+class_report = classification_report(y_test, model.predict(X_test))
+print(class_report)
+#OUTPUT
+   precision    recall  f1-score   support
+
+       False       0.99      0.94      0.97      1191
+        True       0.31      0.81      0.44        37
+
+    accuracy                           0.94      1228
+   macro avg       0.65      0.88      0.71      1228
+weighted avg       0.97      0.94      0.95      1228
+
+#Communicating results
+#Creating a horizontal bar chart with the 10 most important features for the model
+features = X_train_over.columns
+
+# Extract importances from model
+importances = model.best_estimator_.feature_importances_
+
+# Create a series with feature names and importances
+feat_imp = pd.Series(importances, index=features).sort_values()
+
+# Plot 10 most important features
+feat_imp.tail(10).plot(kind="barh")
+plt.xlabel("Gini Importance")
+plt.ylabel("Feature")
+plt.title("Feature Importance")
+
+#Saving the best-performing model to a a file named "model-5-5.pkl".
+with open("model-5-5.pkl", "wb") as f:
+    pickle.dump(model, f)
+    
+with open("model-5-5.pkl", "rb") as f:
+    loaded_model = pickle.load(f)
+print(loaded_model)
+#OUTPUT
+GridSearchCV(cv=5, estimator=GradientBoostingClassifier(random_state=42),
+             n_jobs=-1,
+             param_grid={'max_depth': range(2, 5),
+                         'n_estimators': range(20, 31, 5)},
+             verbose=1)
+
+
