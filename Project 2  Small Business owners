@@ -1,3 +1,11 @@
+#in this project i will:
+#Conduct complex exploratory data analysis on one of the biggest datasets in the DS lab, and compare sub-populations using a side-by-side bar chart.
+#Apply key concepts of unsupervised learning into practice by building an k-means model.
+#Conduct feature selection for clustering based on variance.
+#Reduce high-dimensional data using principal component analysis (PCA).
+#Design, build and deploy a Dash web application
+
+
 # Import libraries here
 import matplotlib.pyplot as plt
 import plotly.express as px
