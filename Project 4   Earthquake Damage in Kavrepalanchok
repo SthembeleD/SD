@@ -1,3 +1,10 @@
+#In this project i will:
+#Extract data from a SQL database
+#Perform a randomized train-test split
+#Build a logistic regression model for classification
+#Build a decision tree model for classification
+#Tune model hyperparameters
+
 import sqlite3
 import matplotlib.pyplot as plt
 import numpy as np
